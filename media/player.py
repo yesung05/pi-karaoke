@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import platform
 import socket
 import subprocess
 import threading
@@ -47,12 +48,21 @@ class MpvPlayer:
         env.setdefault('DISPLAY', ':0')
         env.setdefault('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
 
+        # Pi 4: AV1/VP9 소프트웨어 디코딩 → CPU 과부하. H.264 720p + hwdec + fast 프로파일로 고정.
+        is_linux = platform.system() == 'Linux'
+        ytdl_format = (
+            'bestvideo[height<=1080][vcodec^=avc1]+bestaudio'
+            '/bestvideo[height<=1080]+bestaudio'
+            '/best[height<=1080]'
+            if is_linux else
+            'bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best'
+        )
         cmd = [
             'mpv',
             '--no-terminal',
             '--no-sub',
             '--ytdl',
-            '--ytdl-format=bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best',
+            f'--ytdl-format={ytdl_format}',
             f'--geometry={width}x{height}+{x}+{y}',
             '--fullscreen',
             '--no-border',
@@ -60,7 +70,19 @@ class MpvPlayer:
             f'--input-ipc-server={self.IPC_PATH}',
             f'--log-file={MPV_LOG}',
             '--msg-level=all=warn',
+            '--profile=fast',          # bilinear 스케일러, 보간 없음
+            '--video-sync=audio',      # 프레임 드롭 허용 (CPU 절약)
         ]
+        if is_linux:
+            import sys
+            venv_ytdlp = str(
+                __import__('pathlib').Path(sys.executable).parent / 'yt-dlp'
+            )
+            cmd += [
+                f'--script-opts=ytdl_hook-ytdl_path={venv_ytdlp}',
+                '--hwdec=v4l2m2m',       # Pi 4 H.264 하드웨어 디코딩
+                '--gpu-context=x11egl',  # EGL로 DMA-BUF → GPU 직접 연결 (GLX 대신)
+            ]
         if self.audio_device:
             cmd.append(f'--audio-device={self.audio_device}')
         cmd.append(youtube_url)

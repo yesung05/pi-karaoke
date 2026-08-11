@@ -23,6 +23,12 @@ class AudioEngine:
         self.status_queue:  queue.Queue = queue.Queue(maxsize=5)
         self.latency_queue: queue.Queue = queue.Queue(maxsize=10)
 
+        # Pi (Linux): DSP 올패스 버퍼(~480 samples)보다 blocksize가 작아야
+        # 벡터화 의존성 오류 없음. latency='high'로 underrun 방지.
+        latency = 'low' if platform.system() == 'Windows' else 'high'
+        if platform.system() != 'Windows' and block_size == 0:
+            block_size = 256
+
         self._kwargs = dict(
             samplerate        = sample_rate,
             blocksize         = block_size,
@@ -31,7 +37,7 @@ class AudioEngine:
             device            = (input_device, output_device),
             callback          = self._callback,
             finished_callback = self._on_finished,
-            latency           = 'low',
+            latency           = latency,
         )
 
         # Windows: WASAPI Exclusive 모드
