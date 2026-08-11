@@ -1,0 +1,5 @@
+sounddevice>=0.4.6
+numpy>=1.24.0
+yt-dlp>=2024.8.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
