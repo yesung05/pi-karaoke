@@ -97,6 +97,7 @@ class ControlWindow(tk.Toplevel):
         self._build_meters(inner)
         self._build_engine_ctrl(inner)
         self._build_output_device_selector(inner)
+        self._build_app_exit(inner)
 
     def _on_inner_configure(self, event):
         self._canvas.configure(scrollregion=self._canvas.bbox('all'))
@@ -247,6 +248,17 @@ class ControlWindow(tk.Toplevel):
         tk.Label(lf, textvariable=self._engine_status,
                  bg=self.BG, fg='#aaaacc', font=('Helvetica', 11),
                 ).pack(pady=2)
+
+    def _build_app_exit(self, parent):
+        f = tk.Frame(parent, bg=self.BG, pady=8)
+        f.pack(fill='x', padx=8)
+        tk.Button(
+            f, text='앱 종료',
+            font=('Helvetica', 15, 'bold'),
+            bg='#331111', fg='#ff6666',
+            relief='flat', pady=10, cursor='hand2',
+            command=self._on_close,
+        ).pack(fill='x')
 
     # ── 이벤트 핸들러 ────────────────────────────────────────────
 

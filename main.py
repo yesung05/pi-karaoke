@@ -18,23 +18,47 @@ logging.basicConfig(
 )
 
 
+_ASOUNDRC = """\
+pcm.!default {
+    type pulse
+}
+ctl.!default {
+    type pulse
+}
+"""
+
+
+def _ensure_asoundrc() -> None:
+    """Pi 재부팅 후 ~/.asoundrc 가 사라지는 경우를 대비해 앱 시작마다 재생성."""
+    import os
+    from pathlib import Path
+    if platform.system() != 'Linux':
+        return
+    rc = Path.home() / '.asoundrc'
+    if rc.read_text(errors='replace').strip() == _ASOUNDRC.strip() if rc.exists() else False:
+        return
+    rc.write_text(_ASOUNDRC)
+    logging.info('~/.asoundrc 재생성 완료')
+
+
 def _pick_audio_devices():
     """오디오 장치 인덱스 반환.
 
     - Windows: WASAPI Scarlett 우선
-    - Linux(Pi): libasound2-plugins + ~/.asoundrc(type pulse) 설정 시
-      ALSA default → PipeWire → Scarlett으로 라우팅되므로 None(default) 사용
+    - Linux(Pi): ALSA 'pulse' 장치 → PipeWire → Scarlett
+      asoundrc 유무와 무관하게 항상 pulse 장치를 명시적으로 지정
     """
     if platform.system() == 'Windows':
         in_dev, out_dev = AudioEngine.best_scarlett_devices()
         return in_dev, out_dev
 
-    # Linux: sounddevice 기본 장치(None) = ALSA default
-    # ~/.asoundrc에 'type pulse' 설정이 있으면 PipeWire → Scarlett 라우팅
-    return None, None
+    # Linux: 'pulse' 장치를 명시적으로 사용 (asoundrc 없이도 PipeWire 경유)
+    return 'pulse', 'pulse'
 
 
 def main():
+    _ensure_asoundrc()
+
     # ── 오디오 엔진 ──────────────────────────────────────────────
     params      = EchoParams()
     echo_proc   = EchoProcessor(params)
