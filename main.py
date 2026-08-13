@@ -6,7 +6,7 @@ from audio.dsp    import EchoProcessor, ReverbProcessor
 from audio.engine import AudioEngine
 from config       import EchoParams
 from core.app_state  import AppState
-from core.display    import detect_monitors, assign_displays
+from core.display    import detect_monitors, assign_displays, configure_16_10_monitor
 from core.playback   import PlaybackManager
 from media.player    import MpvPlayer
 from gui.control_window import ControlWindow
@@ -78,8 +78,11 @@ def main():
     player            = MpvPlayer()
     app_state.player  = player
 
-    # ── 모니터 감지 및 배분 ───────────────────────────────────────
-    monitors            = detect_monitors()
+    # ── 모니터 감지 및 해상도 설정 ─────────────────────────────────
+    monitors = detect_monitors()
+    if platform.system() == 'Linux':
+        configure_16_10_monitor(monitors)
+        monitors = detect_monitors()  # 해상도 변경 후 재감지
     media_mon, ctrl_mon = assign_displays(monitors)
     logging.info('감지된 모니터: %s', [m.name for m in monitors])
     logging.info('미디어: %s  제어: %s', media_mon, ctrl_mon)
