@@ -93,6 +93,7 @@ class ControlWindow(tk.Toplevel):
         self._build_playback_btns(inner)
         self._build_search_btn(inner)
         self._build_queue_section(inner)
+        self._build_mr_volume(inner)
         self._build_audio_sliders(inner)
         self._build_meters(inner)
         self._build_engine_ctrl(inner)
@@ -172,6 +173,48 @@ class ControlWindow(tk.Toplevel):
             font=('Helvetica', 13), relief='flat', pady=6,
             command=self._on_queue_remove,
         ).pack(pady=4)
+
+    def _build_mr_volume(self, parent):
+        lf = tk.LabelFrame(parent, text='MR 볼륨', bg=self.BG,
+                            fg='#6666aa', font=self.LBL_FONT, pady=4, padx=6)
+        lf.pack(fill='x', padx=8, pady=4)
+        lf.columnconfigure(1, weight=1)
+
+        self._mr_vol_var = tk.IntVar(value=100)
+        val_lbl = tk.Label(lf, text='100', bg=self.BG, fg='white',
+                           font=('Helvetica', 14, 'bold'), width=5)
+
+        def _on_mr_vol(v):
+            vol = int(float(v))
+            val_lbl.config(text=str(vol))
+            player = getattr(self.app_state, 'player', None)
+            if player is not None:
+                player.set_volume(vol)
+
+        tk.Label(lf, text='MR 음량', bg=self.BG, fg='#ccccdd',
+                 font=('Helvetica', 12), width=9, anchor='w',
+                ).grid(row=0, column=0, sticky='w', padx=4, pady=5)
+        tk.Scale(
+            lf, from_=0, to=130, variable=self._mr_vol_var, orient='horizontal',
+            command=_on_mr_vol, bg=self.BG, fg='white', troughcolor='#334433',
+            sliderlength=50, width=26, highlightthickness=0,
+            length=270,
+        ).grid(row=0, column=1, padx=4, pady=4, sticky='ew')
+        val_lbl.grid(row=0, column=2, padx=4)
+
+        btn_row = tk.Frame(lf, bg=self.BG)
+        btn_row.grid(row=1, column=0, columnspan=3, pady=(0, 4))
+
+        def _set_vol(v):
+            self._mr_vol_var.set(v)
+            _on_mr_vol(v)
+
+        for label, val, color in (('50%', 50, '#443322'), ('100%', 100, '#224433'), ('130%', 130, '#223344')):
+            tk.Button(
+                btn_row, text=label, bg=color, fg='white',
+                font=('Helvetica', 12), relief='flat', padx=10, pady=4,
+                command=lambda v=val: _set_vol(v),
+            ).pack(side='left', padx=5)
 
     def _build_audio_sliders(self, parent):
         lf = tk.LabelFrame(parent, text='볼륨 / 에코 / 리버브', bg=self.BG,
