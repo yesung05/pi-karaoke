@@ -216,24 +216,82 @@ class ControlWindow(tk.Toplevel):
                 command=lambda v=val: _set_vol(v),
             ).pack(side='left', padx=5)
 
+    # 에코 레벨 1~10 프리셋 (wet, feedback, reverb_wet, reverb_room, delay_sec, reverb_damp)
+    _ECHO_PRESETS = [
+        (0.00, 0.00, 0.00, 0.10, 0.20, 0.55),  # 1  드라이
+        (0.08, 0.08, 0.02, 0.12, 0.20, 0.55),  # 2
+        (0.15, 0.15, 0.04, 0.15, 0.20, 0.55),  # 3
+        (0.22, 0.22, 0.06, 0.18, 0.20, 0.55),  # 4
+        (0.28, 0.30, 0.08, 0.22, 0.20, 0.55),  # 5
+        (0.33, 0.38, 0.10, 0.25, 0.20, 0.55),  # 6
+        (0.37, 0.42, 0.11, 0.27, 0.20, 0.55),  # 7
+        (0.40, 0.45, 0.12, 0.30, 0.20, 0.55),  # 8  기본값
+        (0.50, 0.52, 0.18, 0.40, 0.22, 0.50),  # 9
+        (0.60, 0.58, 0.25, 0.55, 0.25, 0.45),  # 10 강한 에코
+    ]
+
     def _build_audio_sliders(self, parent):
-        lf = tk.LabelFrame(parent, text='볼륨 / 에코 / 리버브', bg=self.BG,
+        lf = tk.LabelFrame(parent, text='마이크 볼륨', bg=self.BG,
                             fg='#6666aa', font=self.LBL_FONT, pady=4, padx=6)
         lf.pack(fill='x', padx=8, pady=4)
         lf.columnconfigure(1, weight=1)
 
         p = self.app_state.echo_params
-        rows = [
-            ('출력 볼륨',   0.0,  1.5,  p.volume,      lambda v: setattr(p, 'volume',      v)),
-            ('에코 믹스',   0.0,  1.0,  p.wet,         lambda v: setattr(p, 'wet',         v)),
-            ('에코 딜레이', 0.05, 1.5,  p.delay_sec,   lambda v: setattr(p, 'delay_sec',   v)),
-            ('에코 피드백', 0.0,  0.85, p.feedback,    lambda v: setattr(p, 'feedback',    v)),
-            ('잔향 크기',   0.0,  0.9,  p.reverb_room, lambda v: setattr(p, 'reverb_room', v)),
-            ('고음 흡수',   0.0,  1.0,  p.reverb_damp, lambda v: setattr(p, 'reverb_damp', v)),
-            ('잔향 믹스',   0.0,  1.0,  p.reverb_wet,  lambda v: setattr(p, 'reverb_wet',  v)),
-        ]
-        for row, (label, lo, hi, init, fn) in enumerate(rows):
-            self._slider_row(lf, label, lo, hi, init, fn, row)
+        self._slider_row(lf, '출력 볼륨', 0.0, 1.5, p.volume,
+                         lambda v: setattr(p, 'volume', v), 0)
+
+        lf2 = tk.LabelFrame(parent, text='에코 효과', bg=self.BG,
+                             fg='#6666aa', font=self.LBL_FONT, pady=6, padx=6)
+        lf2.pack(fill='x', padx=8, pady=4)
+
+        self._echo_level = 8
+        self._echo_btns: list[tk.Button] = []
+
+        lv_lbl = tk.Label(lf2, text='레벨', bg=self.BG, fg='#9999bb',
+                          font=('Helvetica', 11))
+        lv_lbl.pack()
+
+        self._echo_lv_var = tk.StringVar(value='8')
+        tk.Label(lf2, textvariable=self._echo_lv_var,
+                 bg=self.BG, fg='white', font=('Helvetica', 32, 'bold'),
+                ).pack()
+
+        row_f = tk.Frame(lf2, bg=self.BG)
+        row_f.pack(pady=4)
+
+        def _set_echo(lv: int):
+            self._echo_level = lv
+            self._echo_lv_var.set(str(lv))
+            for i, b in enumerate(self._echo_btns):
+                active = (i + 1 == lv)
+                b.config(
+                    bg='#3355aa' if active else '#222233',
+                    relief='solid' if active else 'flat',
+                )
+            wet, fb, rv_wet, rv_room, delay, rv_damp = self._ECHO_PRESETS[lv - 1]
+            p2 = self.app_state.echo_params
+            p2.wet         = wet
+            p2.feedback    = fb
+            p2.reverb_wet  = rv_wet
+            p2.reverb_room = rv_room
+            p2.delay_sec   = delay
+            p2.reverb_damp = rv_damp
+
+        for i in range(10):
+            lv = i + 1
+            active = (lv == 8)
+            b = tk.Button(
+                row_f, text=str(lv),
+                bg='#3355aa' if active else '#222233',
+                fg='white', font=('Helvetica', 14, 'bold'),
+                relief='solid' if active else 'flat',
+                padx=6, pady=8, width=3,
+                command=lambda l=lv: _set_echo(l),
+            )
+            b.pack(side='left', padx=2)
+            self._echo_btns.append(b)
+
+        _set_echo(8)
 
     def _slider_row(self, parent, label, lo, hi, init, cmd, row):
         tk.Label(parent, text=label, bg=self.BG, fg='#ccccdd',
