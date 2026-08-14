@@ -25,6 +25,7 @@ FILES_TO_SYNC = [
     'media/chart.py',
     'media/yt_search.py',
     'config.py',
+    'clap.mp3',
 ]
 
 ssh = paramiko.SSHClient()

@@ -6,7 +6,6 @@ ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 ssh.connect('192.168.0.60', username='karaoke', password='12345678', timeout=15)
 
 cmd = r'''
-pkill -f main.py || true
 export DISPLAY=:0
 export XDG_RUNTIME_DIR=/run/user/1000
 cd /home/karaoke/pi-karaoke

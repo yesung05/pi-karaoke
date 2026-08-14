@@ -44,6 +44,11 @@ class AppState:
             self.play_queue.append(song)
         self._notify()
 
+    def enqueue_priority(self, song: SongInfo) -> None:
+        with self._lock:
+            self.play_queue.insert(0, song)
+        self._notify()
+
     def dequeue_next(self) -> Optional[SongInfo]:
         with self._lock:
             return self.play_queue.pop(0) if self.play_queue else None

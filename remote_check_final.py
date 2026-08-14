@@ -24,6 +24,8 @@ xrandr --query 2>/dev/null || true
 
 echo '--- XINPUT ---'
 xinput list --name-only 2>/dev/null || true
+xinput list --id-only 'QDtech MPI7003' 2>/dev/null || true
+xinput list-props 'QDtech MPI7003' 2>/dev/null || true
 '''
 stdin, stdout, stderr = ssh.exec_command(cmd)
 out = stdout.read().decode('utf-8', 'replace')

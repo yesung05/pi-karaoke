@@ -199,6 +199,16 @@ def main():
     if monitors and not ctrl_mon:
         _apply_single_monitor_layout(ctrl_win, media_win, monitors[0])
 
+    # 노래방 시작 시 마이크 엔진을 기본 ON 상태로 준비한다.
+    def _start_mic_default():
+        try:
+            if not engine.is_running:
+                engine.start()
+                logging.info('마이크 기본 상태: ON')
+        except Exception:
+            logging.exception('마이크 기본 시작 실패')
+
+    root.after(500, _start_mic_default)
     root.mainloop()
 
 

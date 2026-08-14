@@ -32,6 +32,9 @@ class MpvPlayer:
         self._end_cb: Optional[Callable[[], None]] = None
         self._target_geom: tuple[int, int, int, int] = (0, 0, 1920, 1080)
         self.audio_device: str = ''  # 'pulse/<sink_name>'; 빈 문자열이면 PipeWire 기본 싱크
+        self._saved_speed = 1.0
+        self._saved_pitch = 0
+        self._saved_volume = 100
 
     def set_end_callback(self, cb: Callable[[], None]) -> None:
         self._end_cb = cb
@@ -72,6 +75,7 @@ class MpvPlayer:
             '--msg-level=all=warn',
             '--profile=fast',          # bilinear 스케일러, 보간 없음
             '--video-sync=audio',      # 프레임 드롭 허용 (CPU 절약)
+            '--audio-pitch-correction=yes',
         ]
         if is_linux:
             import sys
@@ -115,6 +119,13 @@ class MpvPlayer:
             args=(x, y, width, height),
             daemon=True,
         ).start()
+        threading.Thread(target=self._apply_saved_settings, daemon=True).start()
+
+    def _apply_saved_settings(self) -> None:
+        time.sleep(1.0)
+        self.set_speed(self._saved_speed)
+        self.set_pitch(self._saved_pitch)
+        self.set_volume(self._saved_volume)
 
     def _fix_window_position(self, x: int, y: int, width: int, height: int) -> None:
         """mpv 창이 뜬 후 wmctrl로 강제 위치 조정 (labwc 재배치 방지)."""
@@ -156,7 +167,40 @@ class MpvPlayer:
         self._ipc({'command': ['cycle', 'pause']})
 
     def set_volume(self, pct: int) -> None:
-        self._ipc({'command': ['set_property', 'volume', max(0, min(130, pct))]})
+        self._saved_volume = max(0, min(130, pct))
+        self._ipc({'command': ['set_property', 'volume', self._saved_volume]})
+
+    def set_speed(self, factor: float) -> None:
+        """Change song tempo without restarting the current video."""
+        self._saved_speed = max(0.5, min(1.5, factor))
+        self._ipc({'command': ['set_property', 'speed', self._saved_speed]})
+
+    def set_pitch(self, semitones: int) -> None:
+        """Apply a pitch shift to the current song via mpv's lavfi filter."""
+        self._saved_pitch = max(-6, min(6, semitones))
+        semitones = self._saved_pitch
+        # Replace (rather than append) one filter.  atempo compensates for
+        # asetrate's duration change, so pitch changes do not alter tempo.
+        if not semitones:
+            self._ipc({'command': ['af', 'clr', 'all']})
+            return
+        ratio = 2.0 ** (float(semitones) / 12.0)
+        inv = 1.0 / ratio
+        self._ipc({'command': ['af', 'set',
+                               f'lavfi=[asetrate=48000*{ratio:.6f},aresample=48000,atempo={inv:.6f}]']})
+
+    def play_effect(self, path: str) -> None:
+        """Play a short UI effect without interrupting the karaoke video."""
+        env = os.environ.copy()
+        env.setdefault('DISPLAY', ':0')
+        env.setdefault('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
+        cmd = ['mpv', '--no-video', '--no-terminal', '--really-quiet',
+               '--ao=alsa', '--audio-device=alsa/scarlett_dmix', path]
+        try:
+            subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+        except OSError:
+            logger.warning('효과음 재생 실패: %s', path)
 
     def skip(self) -> None:
         self.stop()

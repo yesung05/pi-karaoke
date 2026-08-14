@@ -122,7 +122,7 @@ class MediaWindow(tk.Toplevel):
         )
 
         # ── 장르 탭 바
-        genre_bar = tk.Frame(self, bg='#0c0c22', height=38)
+        genre_bar = tk.Frame(self, bg='#0c0c22', height=48)
         genre_bar.pack(fill='x')
         genre_bar.pack_propagate(False)
 
@@ -130,10 +130,10 @@ class MediaWindow(tk.Toplevel):
         for name, code in GENRES:
             btn = tk.Button(
                 genre_bar, text=name,
-                font=('Helvetica', 11),
+                font=('Helvetica', 15, 'bold'),
                 bg='#181830', fg='#9999dd',
                 activebackground=self.GENRE_SEL, activeforeground='white',
-                relief='flat', padx=8, pady=4, cursor='hand2',
+                relief='flat', padx=10, pady=7, cursor='hand2',
                 command=lambda c=code, n=name: self._on_genre_select(c, n),
             )
             btn.pack(side='left', padx=1, pady=2)
@@ -146,7 +146,7 @@ class MediaWindow(tk.Toplevel):
         sbar.pack_propagate(False)
 
         self._search_entry = tk.Entry(
-            sbar, font=('Helvetica', 16), bg='#22223c', fg='white',
+            sbar, font=('Helvetica', 18, 'bold'), bg='#22223c', fg='white',
             insertbackground='white', relief='flat', bd=6,
         )
         self._search_entry.pack(side='left', fill='x', expand=True, padx=8, pady=6)
@@ -179,7 +179,7 @@ class MediaWindow(tk.Toplevel):
             f, yscrollcommand=sb.set,
             bg=self.LIST_BG, fg='#ccd',
             selectbackground=self.ACCENT,
-            font=('Helvetica', 14), activestyle='none',
+            font=('Helvetica', 20, 'bold'), activestyle='none',
             selectmode='single', bd=0, highlightthickness=0,
         )
         self._chart_lb.pack(fill='both', expand=True)
@@ -200,6 +200,7 @@ class MediaWindow(tk.Toplevel):
             command=self._on_search_select,
         ).pack(fill='x')
 
+        btn_bar.pack_forget()
         lf = tk.Frame(f, bg=self.BG)
         lf.pack(fill='both', expand=True, padx=6)
         sb = tk.Scrollbar(lf)
@@ -208,7 +209,7 @@ class MediaWindow(tk.Toplevel):
             lf, yscrollcommand=sb.set,
             bg=self.LIST_BG, fg='#ccd',
             selectbackground=self.ACCENT,
-            font=('Helvetica', 13), activestyle='none',
+            font=('Helvetica', 19, 'bold'), activestyle='none',
             selectmode='single', bd=0, highlightthickness=0,
         )
         self._search_lb.pack(fill='both', expand=True)
@@ -319,6 +320,14 @@ class MediaWindow(tk.Toplevel):
         entry = self._chart_data[i]
         self._do_search(f'{entry.title} {entry.artist} 노래방')
 
+    def _active_chart_query(self):
+        """Return the query represented by the currently hovered chart row."""
+        idx = self._chart_lb.curselection()
+        if not idx or not self._chart_data or idx[0] >= len(self._chart_data):
+            return None
+        entry = self._chart_data[idx[0]]
+        return f'{entry.title} {entry.artist} 노래방'
+
     def _do_search(self, query: str):
         self._show_view('search')
         short_q = query[:50] + ('...' if len(query) > 50 else '')
@@ -370,6 +379,108 @@ class MediaWindow(tk.Toplevel):
     @property
     def is_visible(self) -> bool:
         return not self._hidden and self.winfo_ismapped()
+
+    def selected_song(self):
+        idx = self._search_lb.curselection()
+        if not idx or idx[0] >= len(self._search_data):
+            return None
+        r = self._search_data[idx[0]]
+        return SongInfo(r.title, r.channel, r.youtube_url, r.thumbnail_url)
+
+    def _song_from_result(self, result: SearchResult) -> SongInfo:
+        return SongInfo(result.title, result.channel, result.youtube_url,
+                        result.thumbnail_url)
+
+    def _search_then(self, query: str, action: str) -> None:
+        """Search a chart row and apply an action to result #1."""
+        def done(results: list[SearchResult]):
+            # 차트 화면은 유지하고, 내부 검색 결과만 액션에 사용한다.
+            self._search_data = results
+            if not results or not self._playback:
+                return
+            song = self._song_from_result(results[0])
+            if action == 'priority':
+                self.app_state.enqueue_priority(song)
+            elif action == 'reserve':
+                # 예약은 현재 재생 상태와 무관하게 대기열에만 추가한다.
+                self.app_state.enqueue(song)
+            elif action == 'start':
+                self._playback._play(song)
+
+        self._searcher.search_async(
+            query, max_results=10,
+            callback=lambda r: self.after(0, lambda: done(r)),
+        )
+
+    def reserve_active(self, priority: bool = False) -> bool:
+        """Reserve hovered item; chart rows automatically use search result #1."""
+        if self._search_frame.winfo_ismapped():
+            song = self.selected_song()
+            if not song or not self._playback:
+                return False
+            if priority:
+                self.app_state.enqueue_priority(song)
+            else:
+                # 예약 버튼은 즉시 재생하지 않고 항상 대기열에 추가한다.
+                self.app_state.enqueue(song)
+            return True
+        query = self._active_chart_query()
+        if not query:
+            return False
+        self._search_then(query, 'priority' if priority else 'reserve')
+        return True
+
+    def start_active(self) -> bool:
+        """Play the currently hovered search/chart item immediately."""
+        if not self._playback:
+            return False
+        if self._search_frame.winfo_ismapped():
+            song = self.selected_song()
+            if not song:
+                return False
+            self._playback._play(song)
+            return True
+        query = self._active_chart_query()
+        if not query:
+            return False
+        self._search_then(query, 'start')
+        return True
+
+    def move_chart_selection(self, delta: int):
+        if not self._chart_data:
+            return
+        current = self._chart_lb.curselection()
+        index = (current[0] if current else 0) + delta
+        index = max(0, min(len(self._chart_data) - 1, index))
+        self._chart_lb.selection_clear(0, 'end')
+        self._chart_lb.selection_set(index)
+        self._chart_lb.activate(index)
+        self._chart_lb.see(index)
+
+    def confirm_chart_selection(self):
+        self._on_chart_select()
+
+    def move_active_selection(self, delta: int):
+        lb = self._search_lb if self._search_frame.winfo_ismapped() else self._chart_lb
+        count = lb.size()
+        if not count:
+            return
+        current = lb.curselection(); index = (current[0] if current else 0) + delta
+        index = max(0, min(count - 1, index))
+        lb.selection_clear(0, 'end'); lb.selection_set(index); lb.activate(index); lb.see(index)
+
+    def confirm_active_selection(self):
+        if self._search_frame.winfo_ismapped():
+            self._on_search_select()
+        else:
+            self._on_chart_select()
+
+    def move_genre(self, delta: int):
+        codes = [code for _, code in GENRES]
+        current = codes.index(self._genre_code) if self._genre_code in codes else 0
+        index = max(0, min(len(GENRES) - 1, current + delta))
+        name, code = GENRES[index]
+        self._on_genre_select(code, name)
 
     def toggle_overlay(self):
         """리모컨 '검색' 버튼 — 열려 있으면 닫고, 닫혀 있으면 연다."""

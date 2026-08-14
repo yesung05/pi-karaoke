@@ -42,6 +42,14 @@ for line in out.splitlines():
 
 if len(monitors) >= 2:
     left, right = sorted(monitors, key=lambda m: m['x'])[:2]
+    # 제어용 서브 모니터의 네이티브 모드(지원되는 경우)를 우선 적용.
+    # 일부 어댑터는 1024x600을 보고하지 않으므로 실패해도 기존 모드를 유지한다.
+    xenv = {**os.environ, 'DISPLAY': ':0'}
+    mode_name = '1024x576'
+    mode_result = subprocess.run(['xrandr', '--query'], capture_output=True,
+                                 text=True, env=xenv)
+    subprocess.run(['xrandr', '--output', right['name'], '--mode', mode_name],
+                   check=False, env=xenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(['xrandr', '--output', left['name'], '--pos', '0x0'], check=False, env={**os.environ, 'DISPLAY': ':0'})
     subprocess.run(['xrandr', '--output', right['name'], '--pos', f'{left["w"]}x0'], check=False, env={**os.environ, 'DISPLAY': ':0'})
 
@@ -49,7 +57,10 @@ if len(monitors) >= 2:
     try:
         xinput_out = subprocess.check_output(['xinput', 'list'], text=True, env={**os.environ, 'DISPLAY': ':0'}, stderr=subprocess.DEVNULL)
         for line in xinput_out.splitlines():
-            if 'touch' in line.lower() and 'xwayland' not in line.lower():
+            # QDtech MPI7003처럼 이름에 touch가 없는 USB 터치 패널도 포함한다.
+            lname = line.lower()
+            if (('touch' in lname or 'qdtech' in lname or 'touchscreen' in lname)
+                    and 'xwayland' not in lname):
                 m = re.search(r'id=(\d+)', line)
                 if m:
                     touch_id = m.group(1)

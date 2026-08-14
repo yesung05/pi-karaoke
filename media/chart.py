@@ -1,4 +1,6 @@
 import logging
+import json
+import os
 import threading
 import time
 from dataclasses import dataclass
@@ -51,6 +53,34 @@ class TJChartFetcher:
         self._cache:      dict[str, list[ChartEntry]] = {}
         self._cache_time: dict[str, float]            = {}
         self._lock        = threading.Lock()
+        self._cache_path = os.path.join(os.path.expanduser('~'), '.cache', 'pi-karaoke', 'charts.json')
+        self._cache_day = date.today().isoformat()
+        self._load_disk_cache()
+
+    def _load_disk_cache(self):
+        try:
+            with open(self._cache_path, encoding='utf-8') as f:
+                data = json.load(f)
+            if data.get('day') != self._cache_day:
+                return
+            for genre, rows in data.get('charts', {}).items():
+                self._cache[genre] = [ChartEntry(**row) for row in rows]
+                self._cache_time[genre] = time.time()
+        except (OSError, ValueError, TypeError, KeyError):
+            pass
+
+    def _save_disk_cache(self):
+        try:
+            os.makedirs(os.path.dirname(self._cache_path), exist_ok=True)
+            payload = {'day': self._cache_day,
+                       'charts': {g: [e.__dict__ for e in rows]
+                                  for g, rows in self._cache.items()}}
+            tmp = self._cache_path + '.tmp'
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp, self._cache_path)
+        except OSError as e:
+            logger.debug('차트 캐시 저장 실패: %s', e)
 
     def get(self, genre_code: str = '', force: bool = False) -> list[ChartEntry]:
         with self._lock:
@@ -65,7 +95,7 @@ class TJChartFetcher:
         genre_code: str = '',
     ) -> None:
         threading.Thread(
-            target=lambda: callback(self._fetch(genre_code)), daemon=True
+            target=lambda: callback(self.get(genre_code)), daemon=True
         ).start()
 
     # ── 내부 ─────────────────────────────────────────────────────────
@@ -114,4 +144,5 @@ class TJChartFetcher:
         with self._lock:
             self._cache[genre_code]      = entries
             self._cache_time[genre_code] = time.time()
+            self._save_disk_cache()
         return entries
