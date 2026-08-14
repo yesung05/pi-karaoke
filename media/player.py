@@ -59,8 +59,10 @@ class MpvPlayer:
             # 병합 스트림 우선: 단일 컨테이너라 오디오·영상 PTS가 이미 정렬됨 → 싱크 안정
             # 분리 스트림(bestvideo+bestaudio)은 DASH 트랙별 초기 PTS가 영상마다 달라
             # 곡마다 딜레이가 달라지는 문제 발생 → 폴백으로만 사용
-            'best[height<=720]'
-            '/bestvideo[height<=720][vcodec^=avc1]+bestaudio'
+            # 720p H.264 영상 + 오디오를 우선 사용해 HD 화질을 확보한다.
+            # 720p가 없는 영상은 결합 스트림/기존 best로 자동 fallback.
+            'bestvideo[height<=720][vcodec^=avc1]+bestaudio'
+            '/best[height<=720]'
             '/best'
             if is_linux else
             'bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best'
@@ -85,7 +87,12 @@ class MpvPlayer:
             '--video-sync=audio',
             '--audio-pitch-correction=no',
             '--audio-buffer=0.2',
-            '--demuxer-max-bytes=50MiB',
+            # 720p 분리 스트림은 네트워크 순간 변동에 민감하므로
+            # 재생 중 버퍼를 확보해 끊김을 흡수한다.
+            '--cache=yes',
+            '--cache-secs=30',
+            '--demuxer-readahead-secs=30',
+            '--demuxer-max-bytes=200MiB',
         ]
         if is_linux:
             import sys

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import paramiko
 
-HOST = '192.168.0.60'
+HOST = '192.168.137.123'
 USER = 'karaoke'
 PASS = '12345678'
 REMOTE_BASE = '/home/karaoke/pi-karaoke'
