@@ -45,6 +45,11 @@ if platform.system() == 'Linux':
             self._reader_tid:   threading.Thread | None = None
             self._watcher_tid:  threading.Thread | None = None
             self._stop_watcher: bool = False
+            # The helper process remains alive after STOP so it can be
+            # restarted cheaply.  Keep the user-visible ON/OFF state
+            # separate from process liveness (otherwise ON is ignored after
+            # an OFF because the process is still present).
+            self._active: bool = False
 
             self.level_queue:         queue.Queue = queue.Queue(maxsize=20)
             self.status_queue:        queue.Queue = queue.Queue(maxsize=5)
@@ -99,10 +104,12 @@ if platform.system() == 'Linux':
 
             self._send_params()
             self._send('START')
+            self._active = True
 
         def stop(self):
             """C 프로세스에 STOP을 보내고 PipeWire를 복원한다."""
             self._send('STOP')
+            self._active = False
             self._resume_pipewire_scarlett()
 
         def _spawn_proc(self):
@@ -183,6 +190,7 @@ if platform.system() == 'Linux':
 
             if not self.status_queue.full():
                 self.status_queue.put_nowait('engine_stopped')
+            self._active = False
 
         def _param_watcher(self):
             """50ms 간격으로 EchoParams 변경 감지 → PARAM 커맨드 전송."""
@@ -197,7 +205,7 @@ if platform.system() == 'Linux':
 
         @property
         def is_running(self) -> bool:
-            return self._proc is not None and self._proc.poll() is None
+            return self._active and self._proc is not None and self._proc.poll() is None
 
         # ── PipeWire 정지/복원 ─────────────────────────────────────
 
