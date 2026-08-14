@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import queue as pyqueue
 import threading
 import tkinter as tk
@@ -38,6 +39,9 @@ class ControlWindow(tk.Toplevel):
         self._configure_geometry()
         self._build_ui()
 
+        self.bind_all('<Escape>', lambda e: self.master.destroy())
+        self.bind_all('<Control-q>', lambda e: self.master.destroy())
+
         app_state.add_listener(lambda: self.after(0, self._refresh_state))
         self.protocol('WM_DELETE_WINDOW', self._on_close)
         self.after(POLL_MS, self._poll_audio)
@@ -51,7 +55,12 @@ class ControlWindow(tk.Toplevel):
         self.title('Pi Karaoke - 제어')
         self.configure(bg=self.BG)
         self.overrideredirect(True)
+        self.attributes('-topmost', True)
+        self.attributes('-fullscreen', False)
         self._apply_geometry()
+        self.update_idletasks()
+        self.deiconify()
+        self.lift()
         self.after(300, self._apply_geometry)
 
     def _apply_geometry(self):
@@ -83,11 +92,17 @@ class ControlWindow(tk.Toplevel):
         inner.bind('<Configure>', self._on_inner_configure)
         self._canvas.bind('<Configure>', self._on_canvas_configure)
 
-        # 터치 스크롤
+        # 터치 드래그 스크롤
         self._canvas.bind('<ButtonPress-1>',
                           lambda e: self._canvas.scan_mark(e.x, e.y))
         self._canvas.bind('<B1-Motion>',
                           lambda e: self._canvas.scan_dragto(e.x, e.y, gain=1))
+
+        # 마우스 휠 스크롤 (Linux: Button-4=위, Button-5=아래 / Windows: MouseWheel)
+        self._canvas.bind('<Button-4>',    lambda e: self._canvas.yview_scroll(-3, 'units'))
+        self._canvas.bind('<Button-5>',    lambda e: self._canvas.yview_scroll( 3, 'units'))
+        self._canvas.bind('<MouseWheel>',
+                          lambda e: self._canvas.yview_scroll(-1 * (e.delta // 120), 'units'))
 
         self._build_now_playing(inner)
         self._build_playback_btns(inner)
@@ -97,14 +112,26 @@ class ControlWindow(tk.Toplevel):
         self._build_audio_sliders(inner)
         self._build_meters(inner)
         self._build_engine_ctrl(inner)
+        self._build_input_device_selector(inner)
         self._build_output_device_selector(inner)
         self._build_app_exit(inner)
+
+        # 모든 자식 위젯에 마우스 휠 스크롤 전파 (버튼·슬라이더 위에서도 스크롤)
+        self.after(100, lambda: self._bind_scroll_recursive(inner))
 
     def _on_inner_configure(self, event):
         self._canvas.configure(scrollregion=self._canvas.bbox('all'))
 
     def _on_canvas_configure(self, event):
         self._canvas.itemconfig(self._canvas_window, width=event.width)
+
+    def _bind_scroll_recursive(self, widget):
+        """자식 위젯에도 마우스 휠 이벤트를 캔버스 스크롤로 연결."""
+        widget.bind('<Button-4>',   lambda e: self._canvas.yview_scroll(-3, 'units'))
+        widget.bind('<Button-5>',   lambda e: self._canvas.yview_scroll( 3, 'units'))
+        widget.bind('<MouseWheel>', lambda e: self._canvas.yview_scroll(-1 * (e.delta // 120), 'units'))
+        for child in widget.winfo_children():
+            self._bind_scroll_recursive(child)
 
     # ── 섹션 빌드 ────────────────────────────────────────────────
 
@@ -365,7 +392,7 @@ class ControlWindow(tk.Toplevel):
 
     def _on_show_search(self):
         if self._media_win:
-            self._media_win.show_overlay()
+            self._media_win.toggle_overlay()
 
     def _on_pause_toggle(self):
         if not self._playback:
@@ -398,12 +425,52 @@ class ControlWindow(tk.Toplevel):
             self.after(0, lambda: self._engine_status.set('실행 중'))
         except Exception as e:
             msg = str(e)
-            self.after(0, lambda: self._engine_status.set('오류'))
-            self.after(0, lambda: messagebox.showerror('오디오 오류', msg, parent=self))
+            logging.error('마이크 엔진 시작 실패: %s', msg, exc_info=True)
+            short = msg.splitlines()[0] if msg else '알 수 없는 오류'
+            self.after(0, lambda: self._engine_status.set(f'오류: {short[:42]}'))
 
     def _on_engine_stop(self):
         self.engine.stop()
         self._engine_status.set('정지')
+
+    def _build_input_device_selector(self, parent):
+        sources = AudioEngine.list_audio_sources()
+        if not sources:
+            return
+
+        lf = tk.LabelFrame(parent, text='마이크 입력 장치', bg=self.BG, fg='#6666aa',
+                            font=self.LBL_FONT, pady=6, padx=6)
+        lf.pack(fill='x', padx=8, pady=4)
+
+        self._source_names = [s[0] for s in sources]
+        self._source_descs = [s[1] for s in sources]
+
+        default_source = AudioEngine.get_default_audio_source()
+        self._source_var = tk.StringVar()
+        if default_source in self._source_names:
+            self._source_var.set(self._source_descs[self._source_names.index(default_source)])
+        elif self._source_descs:
+            self._source_var.set(self._source_descs[0])
+
+        om = tk.OptionMenu(lf, self._source_var, *self._source_descs,
+                           command=self._on_source_change)
+        om.config(bg='#222233', fg='white', font=('Helvetica', 13),
+                  relief='flat', highlightbackground=self.BG,
+                  activebackground='#334466', activeforeground='white', anchor='w')
+        om['menu'].config(bg='#222233', fg='white', font=('Helvetica', 12))
+        om.pack(fill='x', padx=4, pady=4)
+
+    def _on_source_change(self, desc: str):
+        if not hasattr(self, '_source_descs') or desc not in self._source_descs:
+            return
+        source_name = self._source_names[self._source_descs.index(desc)]
+        AudioEngine.set_default_audio_source(source_name)
+
+        if self.engine.is_running:
+            self._engine_status.set('전환 중...')
+            self.update_idletasks()
+            self.engine.stop()
+            self.after(300, self._restart_engine_after_sink)
 
     def _build_output_device_selector(self, parent):
         sinks = AudioEngine.list_audio_sinks()

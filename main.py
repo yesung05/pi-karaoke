@@ -1,5 +1,7 @@
 import logging
+import os
 import platform
+import time
 import tkinter as tk
 
 from audio.dsp    import EchoProcessor, ReverbProcessor
@@ -18,47 +20,118 @@ logging.basicConfig(
 )
 
 
-_ASOUNDRC = """\
-pcm.!default {
-    type pulse
-}
-ctl.!default {
-    type pulse
-}
-"""
-
-
-def _ensure_asoundrc() -> None:
-    """Pi 재부팅 후 ~/.asoundrc 가 사라지는 경우를 대비해 앱 시작마다 재생성."""
-    import os
-    from pathlib import Path
-    if platform.system() != 'Linux':
-        return
-    rc = Path.home() / '.asoundrc'
-    if rc.read_text(errors='replace').strip() == _ASOUNDRC.strip() if rc.exists() else False:
-        return
-    rc.write_text(_ASOUNDRC)
-    logging.info('~/.asoundrc 재생성 완료')
-
-
 def _pick_audio_devices():
-    """오디오 장치 인덱스 반환.
+    """오디오 장치 반환.
 
     - Windows: WASAPI Scarlett 우선
-    - Linux(Pi): ALSA 'pulse' 장치 → PipeWire → Scarlett
-      asoundrc 유무와 무관하게 항상 pulse 장치를 명시적으로 지정
+    - Linux(Pi): ALSA dmix 공유 재생 + 하드웨어 직접 캡처
+      * PipeWire Scarlett 정지 → ALSA가 hw:X,0 접근 가능
+      * 입력: 하드웨어 직접 (커널 IRQ, underrun 없음)
+      * 출력: scarlett_dmix (mpv와 공유)
     """
     if platform.system() == 'Windows':
-        in_dev, out_dev = AudioEngine.best_scarlett_devices()
-        return in_dev, out_dev
+        return AudioEngine.best_scarlett_devices()
 
-    # Linux: 'pulse' 장치를 명시적으로 사용 (asoundrc 없이도 PipeWire 경유)
-    return 'pulse', 'pulse'
+    import os, re, subprocess
+    from pathlib import Path
+    import sounddevice as sd
+    env = {**os.environ, 'XDG_RUNTIME_DIR': f'/run/user/{os.getuid()}'}
+
+    # ── Step 1: PortAudio 스캔으로 Scarlett 카드 번호 확인 ──────
+    try:
+        sd._terminate()
+        sd._initialize()
+    except Exception:
+        pass
+
+    card = None
+    in_dev_idx = None
+    for i, d in enumerate(sd.query_devices()):
+        name = d['name']
+        if ('scarlett' in name.lower() or 'focusrite' in name.lower()) \
+                and 'dmix' not in name.lower() and 'dsnoop' not in name.lower():
+            m = re.search(r'hw:(\d+)', name)
+            if m and d['max_input_channels'] > 0:
+                card = int(m.group(1))
+                in_dev_idx = i
+                logging.info('Scarlett 하드웨어 장치: [%d] %s (card=%d)', i, name, card)
+                break
+
+    if card is None:
+        card = AudioEngine.find_scarlett_alsa_card()
+
+    if card is None:
+        logging.warning('Scarlett 장치를 찾지 못함 → pulse 폴백')
+        return 'pulse', 'pulse'
+
+    # ── Step 2: PipeWire Scarlett 정지 → ALSA 직접 접근 확보 ───
+    for list_cmd, suspend_cmd in [
+        (['pactl', 'list', 'sources', 'short'], 'suspend-source'),
+        (['pactl', 'list', 'sinks',   'short'], 'suspend-sink'),
+    ]:
+        try:
+            res = subprocess.run(list_cmd, capture_output=True, text=True, timeout=5, env=env)
+            for line in res.stdout.splitlines():
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                name = parts[1]
+                if ('scarlett' in name.lower() or 'focusrite' in name.lower()) \
+                        and 'monitor' not in name.lower():
+                    subprocess.run(['pactl', suspend_cmd, name, '1'],
+                                   capture_output=True, timeout=5, env=env)
+                    logging.info('PipeWire %s 정지: %s', suspend_cmd, name)
+        except Exception as e:
+            logging.warning('PipeWire suspend 실패: %s', e)
+
+    time.sleep(0.3)  # PipeWire가 장치를 완전히 해제할 시간
+
+    # ── Step 3: scarlett_dmix .asoundrc 생성 (재생 공유용) ──────
+    asoundrc = (
+        f'pcm.scarlett_dmix {{\n'
+        f'    type dmix\n'
+        f'    ipc_key 2048\n'
+        f'    ipc_key_add_uid yes\n'
+        f'    slave {{\n'
+        f'        pcm "hw:{card},0"\n'
+        f'        rate 48000\n'
+        f'        format S32_LE\n'
+        f'        period_size 256\n'
+        f'        buffer_size 2048\n'
+        f'        channels 2\n'
+        f'    }}\n'
+        f'    bindings {{ 0 0  1 1 }}\n'
+        f'    hint {{\n'
+        f'        show yes\n'
+        f'        description "Scarlett Solo shared playback"\n'
+        f'    }}\n'
+        f'}}\n'
+        f'\n'
+        f'pcm.!default {{\n'
+        f'    type pulse\n'
+        f'}}\n'
+        f'ctl.!default {{\n'
+        f'    type pulse\n'
+        f'}}\n'
+    )
+    Path.home().joinpath('.asoundrc').write_text(asoundrc)
+    logging.info('~/.asoundrc 재생성: dmix card=%d period=256', card)
+
+    # ── Step 4: PortAudio 재초기화 → dmix 장치 인식 ─────────────
+    try:
+        sd._terminate()
+        sd._initialize()
+    except Exception as e:
+        logging.warning('PortAudio 재초기화 실패: %s', e)
+
+    # C 엔진은 ALSA 문자열을 직접 사용하므로 sounddevice 장치 목록에
+    # scarlett_dmix가 보이지 않아도 우선 적용해본다.
+    alsa_cap = f'hw:{card},0'
+    logging.info('ALSA 모드: in=%s out=scarlett_dmix (dmix 우선)', alsa_cap)
+    return alsa_cap, 'scarlett_dmix'
 
 
 def main():
-    _ensure_asoundrc()
-
     # ── 오디오 엔진 ──────────────────────────────────────────────
     params      = EchoParams()
     echo_proc   = EchoProcessor(params)
@@ -76,12 +149,17 @@ def main():
 
     # ── mpv 플레이어 ─────────────────────────────────────────────
     player            = MpvPlayer()
+    # out_dev가 pulse 폴백이면 mpv도 pulse, dmix면 alsa/dmix
+    if out_dev and out_dev != 'pulse':
+        player.audio_device = f'alsa/{out_dev}'
     app_state.player  = player
 
     # ── 모니터 감지 및 해상도 설정 ─────────────────────────────────
     monitors = detect_monitors()
     if platform.system() == 'Linux':
+        os.environ.setdefault('DISPLAY', ':0')
         configure_16_10_monitor(monitors)
+        time.sleep(1)  # xrandr 적용 후 화면 좌표 안정화
         monitors = detect_monitors()  # 해상도 변경 후 재감지
     media_mon, ctrl_mon = assign_displays(monitors)
     logging.info('감지된 모니터: %s', [m.name for m in monitors])
@@ -92,8 +170,9 @@ def main():
 
     # ── tkinter: 숨겨진 Root ─────────────────────────────────────
     root = tk.Tk()
-    root.withdraw()
     root.title('Pi Karaoke Root')
+    root.update_idletasks()
+    root.deiconify()
 
     # ── HDMI1 제어 창 ────────────────────────────────────────────
     ctrl_win = ControlWindow(
@@ -109,6 +188,13 @@ def main():
 
     # 두 창 상호 참조 연결
     ctrl_win.set_media_window(media_win)
+
+    # X11에서 창이 비어 보이거나 가려지지 않도록 보이는 시점에 강제 반영
+    root.update_idletasks()
+    ctrl_win.update_idletasks()
+    media_win.update_idletasks()
+    ctrl_win.lift()
+    media_win.lift()
 
     # ── 단일 모니터 폴백 ─────────────────────────────────────────
     if monitors and not ctrl_mon:

@@ -51,9 +51,9 @@ class MpvPlayer:
         # Pi 4: AV1/VP9 소프트웨어 디코딩 → CPU 과부하. H.264 720p + hwdec + fast 프로파일로 고정.
         is_linux = platform.system() == 'Linux'
         ytdl_format = (
-            'bestvideo[height<=1080][vcodec^=avc1]+bestaudio'
-            '/bestvideo[height<=1080]+bestaudio'
-            '/best[height<=1080]'
+            'bestvideo[height<=720][vcodec^=avc1]+bestaudio'
+            '/bestvideo[height<=720]+bestaudio'
+            '/best[height<=720]'
             if is_linux else
             'bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best'
         )
@@ -80,16 +80,25 @@ class MpvPlayer:
             )
             cmd += [
                 f'--script-opts=ytdl_hook-ytdl_path={venv_ytdlp}',
-                '--hwdec=v4l2m2m',       # Pi 4 H.264 하드웨어 디코딩
-                '--gpu-context=x11egl',  # EGL로 DMA-BUF → GPU 직접 연결 (GLX 대신)
+                '--hwdec=v4l2m2m-copy',      # Pi 4 H.264 하드웨어 디코딩 → RAM 복사 (DMA-BUF 없음 → X11 락 없음)
+                '--gpu-context=x11egl',      # EGL on X11 (copy모드라 DMA-BUF import 없음 → 마우스 정상)
+                '--ao=alsa',                 # ALSA 직접 출력 (PipeWire 우회)
             ]
-        if self.audio_device:
+            # dmix 장치명: main.py가 설정한 값 사용 (폴백 시 pulse와 일치)
+            ao_dev = self.audio_device if self.audio_device else 'alsa/scarlett_dmix'
+            cmd.append(f'--audio-device={ao_dev}')
+        elif self.audio_device:
             cmd.append(f'--audio-device={self.audio_device}')
         cmd.append(youtube_url)
+
+        # mpv를 코어 2,3에 고정(오디오 코어 0,1과 분리) + nice +5
+        # 코어 분리로 경쟁이 없으므로 nice는 +5로 완화
+        launch_cmd = (['taskset', '-c', '2,3', 'nice', '-n', '5'] + cmd) if is_linux else cmd
+
         with self._lock:
             try:
                 self._proc = subprocess.Popen(
-                    cmd,
+                    launch_cmd,
                     env=env,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,

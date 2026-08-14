@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import re
 import subprocess
 from dataclasses import dataclass
@@ -82,30 +82,43 @@ def set_monitor_resolution(output_name: str, width: int, height: int) -> bool:
         return False
 
 
-def configure_16_10_monitor(monitors: list[MonitorInfo]) -> None:
-    """두 번째 HDMI 포트(미디어 창)를 16:10 최적 해상도로 설정.
+def _reposition_monitors(media_name: str, media_width: int, ctrl_name: str) -> None:
+    """왼쪽 미디어 / 오른쪽 제어 모니터 배치를 xrandr로 재확정."""
+    try:
+        r = subprocess.run(
+            [
+                'xrandr',
+                '--output', media_name, '--pos', '0x0',
+                '--output', ctrl_name, '--pos', f'{media_width}x0',
+            ],
+            capture_output=True, text=True, timeout=8,
+            env={**__import__('os').environ, 'DISPLAY': ':0'},
+        )
+        if r.returncode == 0:
+            logger.info('xrandr 재배치: %s(0x0) / %s(%dx0)', media_name, ctrl_name, media_width)
+        else:
+            logger.warning('xrandr 재배치 실패: %s', r.stderr.strip())
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError) as e:
+        logger.warning('xrandr 재배치 오류: %s', e)
 
-    지원 모드 중 16:10 비율(w/h ≈ 1.6)인 것 중 가장 높은 해상도를 선택.
-    이미 16:10 해상도면 건드리지 않음.
-    """
+
+def configure_16_10_monitor(monitors: list[MonitorInfo]) -> None:
+    """왼쪽 모니터를 미디어로 두고, 16:10 비율을 적용한 뒤 위치를 유지한다."""
     if not monitors:
         return
 
-    def _port_num(m: MonitorInfo) -> int:
-        digits = ''.join(filter(str.isdigit, m.name))
-        return int(digits) if digits else 0
-
-    ordered = sorted(monitors, key=_port_num)
-    if len(ordered) < 2:
+    by_x = sorted(monitors, key=lambda m: m.x)
+    if len(by_x) < 2:
         return
 
-    target = ordered[1]  # 두 번째 HDMI = media 모니터
+    media_mon = by_x[0]
+    ctrl_mon = by_x[-1]
 
-    # 이미 16:10 비율이면 스킵
-    if target.height > 0:
-        ratio = target.width / target.height
+    if media_mon.height > 0:
+        ratio = media_mon.width / media_mon.height
         if abs(ratio - 16 / 10) < 0.02:
-            logger.info('%s 이미 16:10 비율(%dx%d), 변경 불필요', target.name, target.width, target.height)
+            logger.info('%s 이미 16:10 비율(%dx%d), 위치만 재확정', media_mon.name, media_mon.width, media_mon.height)
+            _reposition_monitors(media_mon.name, media_mon.width, ctrl_mon.name)
             return
 
     try:
@@ -117,18 +130,18 @@ def configure_16_10_monitor(monitors: list[MonitorInfo]) -> None:
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
         return
 
-    available = modes.get(target.name, [])
-    # 16:10 비율 필터 (허용 오차 2%)
+    available = modes.get(media_mon.name, [])
     candidates = [
         (w, h) for w, h in available
         if h > 0 and abs(w / h - 16 / 10) < 0.02
     ]
     if not candidates:
-        logger.warning('%s: 16:10 해상도 모드 없음. 사용 가능: %s', target.name, available[:5])
+        logger.warning('%s: 16:10 해상도 모드 없음. 사용 가능: %s', media_mon.name, available[:5])
         return
 
     best_w, best_h = max(candidates, key=lambda wh: wh[0] * wh[1])
-    set_monitor_resolution(target.name, best_w, best_h)
+    if set_monitor_resolution(media_mon.name, best_w, best_h):
+        _reposition_monitors(media_mon.name, best_w, ctrl_mon.name)
 
 
 def assign_displays(
@@ -136,13 +149,16 @@ def assign_displays(
 ) -> tuple[Optional[MonitorInfo], Optional[MonitorInfo]]:
     """
     (media_mon, ctrl_mon) 반환.
-    픽셀 수 기준: 큰 쪽 = HDMI0(미디어), 작은 쪽 = HDMI1(제어).
+    X 좌표 기준: 왼쪽 = 미디어, 오른쪽 = 제어(터치).
     모니터 1개 → (monitors[0], None).
     모니터 0개 → (None, None).
     """
     if not monitors:
         return None, None
-    by_size = sorted(monitors, key=lambda m: m.width * m.height, reverse=True)
-    media_mon = by_size[0]
-    ctrl_mon  = by_size[1] if len(by_size) > 1 else None
+    if len(monitors) == 1:
+        return monitors[0], None
+
+    by_x = sorted(monitors, key=lambda m: m.x)
+    media_mon = by_x[0]
+    ctrl_mon = by_x[-1]
     return media_mon, ctrl_mon

@@ -10,6 +10,7 @@ from media.yt_search import YTSearcher, SearchResult
 
 # 오버레이 패널 높이 비율 (모니터 전체 높이 대비)
 PANEL_H_RATIO = 0.30
+INACTIVITY_MS = 20_000   # 20초 조작 없으면 자동 닫힘
 
 
 class MediaWindow(tk.Toplevel):
@@ -38,14 +39,20 @@ class MediaWindow(tk.Toplevel):
         self._chart_data:  list[ChartEntry]   = []
         self._search_data: list[SearchResult] = []
         self._genre_code  = ''
-        self._hidden      = False   # 사용자가 수동으로 숨김
+        self._hidden           = False   # 사용자가 수동으로 숨김
+        self._inactivity_job   = None    # after() 핸들 (자동 닫힘 타이머)
 
         self._configure_geometry()
         self._build_ui()
+        self.bind_all('<Escape>', lambda e: self.master.destroy())
+        self.bind_all('<Control-q>', lambda e: self.master.destroy())
         self._show_view('chart')
         self._load_chart()
 
         app_state.add_listener(lambda: self.after(0, self._refresh_status))
+
+        # 창 안 어떤 상호작용이든 비활성 타이머 리셋
+        self._bind_activity_recursive(self)
 
     # ── 창 설정 ─────────────────────────────────────────────────
 
@@ -55,11 +62,15 @@ class MediaWindow(tk.Toplevel):
         self.overrideredirect(True)
         # 항상 최상위 (mpv 위)
         self.attributes('-topmost', True)
+        self.attributes('-fullscreen', False)
         try:
             self.attributes('-alpha', self.ALPHA)
         except tk.TclError:
             pass  # X11에서 지원 안 할 수 있음
         self._apply_geometry()
+        self.update_idletasks()
+        self.deiconify()
+        self.lift()
         self.after(300, self._apply_geometry)
 
     def _apply_geometry(self):
@@ -205,9 +216,30 @@ class MediaWindow(tk.Toplevel):
         sb.config(command=self._search_lb.yview)
         return f
 
+    # ── 비활성 타이머 ────────────────────────────────────────────
+
+    def _bind_activity_recursive(self, widget):
+        """위젯과 모든 자식에 상호작용 감지 바인딩 — 스크롤·클릭·키 입력 시 타이머 리셋."""
+        for seq in ('<ButtonPress-1>', '<Button-4>', '<Button-5>',
+                    '<MouseWheel>', '<Key>'):
+            widget.bind(seq, self._on_any_activity, add=True)
+        for child in widget.winfo_children():
+            self._bind_activity_recursive(child)
+
+    def _on_any_activity(self, _event=None):
+        if not self._hidden:
+            self._reset_inactivity_timer()
+
+    def _reset_inactivity_timer(self):
+        """조작이 감지될 때마다 호출 — 20초 타이머를 재시작."""
+        if self._inactivity_job is not None:
+            self.after_cancel(self._inactivity_job)
+        self._inactivity_job = self.after(INACTIVITY_MS, self._manual_hide)
+
     # ── 장르 탭 ─────────────────────────────────────────────────
 
     def _on_genre_select(self, code: str, name: str):
+        self._reset_inactivity_timer()
         self._genre_code = code
         self._highlight_genre(code)
         self._title_var.set(f'TJ 미디어 {name} TOP 100')
@@ -236,6 +268,7 @@ class MediaWindow(tk.Toplevel):
             self._back_btn.pack(side='left', padx=6)
 
     def _on_back(self):
+        self._reset_inactivity_timer()
         self._show_view('chart')
         short = self._title_var.get()
         for name, code in GENRES:
@@ -264,16 +297,19 @@ class MediaWindow(tk.Toplevel):
                 'end',
                 f'  {e.rank:3d}.  {e.title}   —   {e.artist}',
             )
+        self._bind_activity_recursive(self._chart_lb)
 
     # ── 검색 ────────────────────────────────────────────────────
 
     def _on_manual_search(self):
+        self._reset_inactivity_timer()
         q = self._search_entry.get().strip()
         if q:
             suffix = '' if '노래방' in q else ' 노래방'
             self._do_search(q + suffix)
 
     def _on_chart_select(self, _event=None):
+        self._reset_inactivity_timer()
         idx = self._chart_lb.curselection()
         if not idx or not self._chart_data:
             return
@@ -308,8 +344,10 @@ class MediaWindow(tk.Toplevel):
                 'end',
                 f'  [{r.duration_fmt}]  {r.title}   —   {r.channel}',
             )
+        self._bind_activity_recursive(self._search_lb)
 
     def _on_search_select(self, _event=None):
+        self._reset_inactivity_timer()
         idx = self._search_lb.curselection()
         if not idx or not self._search_data:
             return
@@ -329,20 +367,34 @@ class MediaWindow(tk.Toplevel):
 
     # ── 오버레이 API (ControlWindow 호환) ────────────────────────
 
+    @property
+    def is_visible(self) -> bool:
+        return not self._hidden and self.winfo_ismapped()
+
+    def toggle_overlay(self):
+        """리모컨 '검색' 버튼 — 열려 있으면 닫고, 닫혀 있으면 연다."""
+        if self.is_visible:
+            self._manual_hide()
+        else:
+            self.show_overlay()
+
     def show_overlay(self):
-        """컨트롤러 '검색' 버튼에서 호출 — 패널을 다시 표시."""
+        """패널 표시 + 비활성 타이머 시작."""
         self._hidden = False
         self.deiconify()
         self._apply_geometry()
         self.attributes('-topmost', True)
         self.lift()
+        self._reset_inactivity_timer()
 
     def hide_overlay(self):
-        """패널 숨기기 (show_overlay로 다시 열 수 있음)."""
         self._manual_hide()
 
     def _manual_hide(self):
         self._hidden = True
+        if self._inactivity_job is not None:
+            self.after_cancel(self._inactivity_job)
+            self._inactivity_job = None
         self.withdraw()
 
     # ── 상태 갱신 ────────────────────────────────────────────────
