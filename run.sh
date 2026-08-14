@@ -50,8 +50,12 @@ if len(monitors) >= 2:
                                  text=True, env=xenv)
     subprocess.run(['xrandr', '--output', right['name'], '--mode', mode_name],
                    check=False, env=xenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # 메인 영상 모니터는 QHD 패널에서도 FHD 모드로 출력해 렌더링 부하를 낮춘다.
+    media_mode = '1920x1200'
+    subprocess.run(['xrandr', '--output', left['name'], '--mode', media_mode],
+                   check=False, env=xenv, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     subprocess.run(['xrandr', '--output', left['name'], '--pos', '0x0'], check=False, env={**os.environ, 'DISPLAY': ':0'})
-    subprocess.run(['xrandr', '--output', right['name'], '--pos', f'{left["w"]}x0'], check=False, env={**os.environ, 'DISPLAY': ':0'})
+    subprocess.run(['xrandr', '--output', right['name'], '--pos', '1920x0'], check=False, env={**os.environ, 'DISPLAY': ':0'})
 
     touch_id = None
     try:

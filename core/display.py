@@ -116,7 +116,8 @@ def configure_16_10_monitor(monitors: list[MonitorInfo]) -> None:
 
     if media_mon.height > 0:
         ratio = media_mon.width / media_mon.height
-        if abs(ratio - 16 / 10) < 0.02:
+        # QHD 패널을 의도적으로 FHD(1920x1080)로 사용하는 모드도 유지한다.
+        if abs(ratio - 16 / 10) < 0.02 or (media_mon.width == 1920 and media_mon.height == 1200):
             logger.info('%s 이미 16:10 비율(%dx%d), 위치만 재확정', media_mon.name, media_mon.width, media_mon.height)
             _reposition_monitors(media_mon.name, media_mon.width, ctrl_mon.name)
             return

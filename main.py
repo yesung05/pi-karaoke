@@ -96,7 +96,7 @@ def _pick_audio_devices():
         f'        pcm "hw:{card},0"\n'
         f'        rate 48000\n'
         f'        format S32_LE\n'
-        f'        period_size 256\n'
+        f'        period_size 512\n'
         f'        buffer_size 2048\n'
         f'        channels 2\n'
         f'    }}\n'
@@ -115,7 +115,7 @@ def _pick_audio_devices():
         f'}}\n'
     )
     Path.home().joinpath('.asoundrc').write_text(asoundrc)
-    logging.info('~/.asoundrc 재생성: dmix card=%d period=256', card)
+    logging.info('~/.asoundrc 재생성: dmix card=%d period=512 buf=2048', card)
 
     # ── Step 4: PortAudio 재초기화 → dmix 장치 인식 ─────────────
     try:

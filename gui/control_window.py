@@ -312,7 +312,7 @@ class ControlWindow(tk.Toplevel):
         self._packed_stepper(lf, '에코', 8, 1, 10, 1,
                              lambda v: set_echo(int(v)), decimals=0)
         player = getattr(self.app_state, 'player', None)
-        self._packed_stepper(lf, '반주 볼륨', 80, 0, 130, 5,
+        self._packed_stepper(lf, '반주 볼륨', 40, 0, 130, 5,
                              lambda v: player.set_volume(int(v)) if player else None,
                              decimals=0)
 

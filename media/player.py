@@ -34,7 +34,7 @@ class MpvPlayer:
         self.audio_device: str = ''  # 'pulse/<sink_name>'; 빈 문자열이면 PipeWire 기본 싱크
         self._saved_speed = 1.0
         self._saved_pitch = 0
-        self._saved_volume = 100
+        self._saved_volume = 40
 
     def set_end_callback(self, cb: Callable[[], None]) -> None:
         self._end_cb = cb
@@ -52,10 +52,15 @@ class MpvPlayer:
         env.setdefault('XDG_RUNTIME_DIR', f'/run/user/{os.getuid()}')
 
         # Pi 4: AV1/VP9 소프트웨어 디코딩 → CPU 과부하. H.264 720p + hwdec + fast 프로파일로 고정.
+        # best[ext=mp4] 단독은 사전 합성 스트림만 탐색해 실제론 360p 이하가 선택됨.
+        # bestvideo+bestaudio 분리 스트림으로 실질적 720p H.264를 확보한다.
         is_linux = platform.system() == 'Linux'
         ytdl_format = (
-            'best[ext=mp4][height<=720]'
-            '/best[height<=720]'
+            # 병합 스트림 우선: 단일 컨테이너라 오디오·영상 PTS가 이미 정렬됨 → 싱크 안정
+            # 분리 스트림(bestvideo+bestaudio)은 DASH 트랙별 초기 PTS가 영상마다 달라
+            # 곡마다 딜레이가 달라지는 문제 발생 → 폴백으로만 사용
+            'best[height<=720]'
+            '/bestvideo[height<=720][vcodec^=avc1]+bestaudio'
             '/best'
             if is_linux else
             'bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best'
@@ -73,9 +78,14 @@ class MpvPlayer:
             f'--input-ipc-server={self.IPC_PATH}',
             f'--log-file={MPV_LOG}',
             '--msg-level=all=warn',
-            '--profile=fast',          # bilinear 스케일러, 보간 없음
-            '--video-sync=audio',      # 프레임 드롭 허용 (CPU 절약)
-            '--audio-pitch-correction=yes',
+            '--profile=fast',
+            # dmix의 snd_pcm_delay()가 실제보다 큰 값을 반환하는 알려진 문제로
+            # --video-sync=audio 사용 시 오디오 클럭이 느리게 인식돼 영상이 늦음.
+            # desync: 오디오·영상 각각 스트림 PTS 기반으로 독립 재생 (dmix 클럭 의존 제거)
+            '--video-sync=audio',
+            '--audio-pitch-correction=no',
+            '--audio-buffer=0.2',
+            '--demuxer-max-bytes=50MiB',
         ]
         if is_linux:
             import sys
@@ -95,9 +105,9 @@ class MpvPlayer:
             cmd.append(f'--audio-device={self.audio_device}')
         cmd.append(youtube_url)
 
-        # mpv를 코어 2,3에 고정(오디오 코어 0,1과 분리) + nice +5
-        # 코어 분리로 경쟁이 없으므로 nice는 +5로 완화
-        launch_cmd = (['taskset', '-c', '2,3', 'nice', '-n', '5'] + cmd) if is_linux else cmd
+        # mpv를 코어 2,3에 고정(오디오 코어 0,1과 분리)
+        # nice를 제거: 오디오 스레드가 dmix 5.3ms 주기를 지키려면 기본 우선순위 필요
+        launch_cmd = (['taskset', '-c', '2,3'] + cmd) if is_linux else cmd
 
         with self._lock:
             try:
@@ -123,8 +133,10 @@ class MpvPlayer:
 
     def _apply_saved_settings(self) -> None:
         time.sleep(1.0)
-        self.set_speed(self._saved_speed)
-        self.set_pitch(self._saved_pitch)
+        if self._saved_speed != 1.0:
+            self.set_speed(self._saved_speed)
+        if self._saved_pitch != 0:
+            self.set_pitch(self._saved_pitch)
         self.set_volume(self._saved_volume)
 
     def _fix_window_position(self, x: int, y: int, width: int, height: int) -> None:
