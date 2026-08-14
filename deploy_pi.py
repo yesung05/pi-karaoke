@@ -22,6 +22,8 @@ FILES_TO_SYNC = [
     'gui/widgets.py',
     'audio/dsp.py',
     'audio/engine.py',
+    'audio/karaoke_audio.c',
+    'audio/Makefile',
     'media/player.py',
     'media/chart.py',
     'media/yt_search.py',
@@ -56,6 +58,7 @@ for rel in FILES_TO_SYNC:
 
 stdin, stdout, stderr = ssh.exec_command(
     "pkill -f main.py || true; "
+    "make -C /home/karaoke/pi-karaoke/audio karaoke_audio >/tmp/karaoke_build.log 2>&1; "
     "nohup bash /home/karaoke/pi-karaoke/run.sh >/tmp/karaoke.log 2>&1 &"
 )
 stdout.channel.recv_exit_status()

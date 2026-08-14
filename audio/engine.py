@@ -9,6 +9,7 @@ audio/engine.py — AudioEngine
 """
 
 import platform
+import logging
 
 if platform.system() == 'Linux':
     # ── Linux: C 프로세스 엔진 ──────────────────────────────────
@@ -180,6 +181,10 @@ if platform.system() == 'Linux':
                         try:
                             in_rms  = float(parts[1])
                             out_rms = float(parts[2])
+                            if len(parts) >= 4:
+                                xruns = int(parts[3])
+                                if xruns:
+                                    logging.warning('오디오 XRUN 감지: %d회', xruns)
                             if not self.level_queue.full():
                                 self.level_queue.put_nowait((in_rms, out_rms))
                         except ValueError:

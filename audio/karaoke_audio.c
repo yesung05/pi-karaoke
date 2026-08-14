@@ -25,10 +25,10 @@
 
 /* ── 오디오 포맷 상수 ───────────────────────────────────────── */
 #define SAMPLE_RATE    48000
-#define CHANNELS_IN    2   /* Scarlett Solo는 스테레오 캡처만 지원; 왼쪽 채널만 처리 */
+#define CHANNELS_IN    2   /* Scarlett hw capture endpoint requires 2 channels */
 #define CHANNELS_OUT   2
-#define PERIOD_FRAMES  256
-#define BUFFER_FRAMES  1024
+#define PERIOD_FRAMES  512
+#define BUFFER_FRAMES  2048
 #define INT32_SCALE    2147483647.0f
 
 /* ── 원자적 float 헬퍼 (uint32 비트 재해석) ─────────────────── */
@@ -189,7 +189,10 @@ static snd_pcm_t *open_pcm(const char *dev, snd_pcm_stream_t stream,
     snd_pcm_hw_params_any(h, hw);
     snd_pcm_hw_params_set_access(h, hw, SND_PCM_ACCESS_RW_INTERLEAVED);
     snd_pcm_hw_params_set_format(h, hw, SND_PCM_FORMAT_S32_LE);
-    snd_pcm_hw_params_set_channels(h, hw, (unsigned)ch);
+    if (snd_pcm_hw_params_set_channels(h, hw, (unsigned)ch) < 0) {
+        fprintf(stderr, "ERROR set_channels %d on %s\n", ch, dev);
+        snd_pcm_close(h); return NULL;
+    }
     if (snd_pcm_hw_params_set_rate(h, hw, rate, 0) < 0) {
         fprintf(stderr, "ERROR set_rate %u on %s\n", rate, dev);
         snd_pcm_close(h); return NULL;
@@ -316,7 +319,7 @@ int main(int argc, char **argv) {
     printf("READY\n");
     fflush(stdout);
 
-    int32_t cap_raw[PERIOD_FRAMES * CHANNELS_IN];  /* 2ch 스테레오 버퍼 */
+    int32_t cap_raw[PERIOD_FRAMES * CHANNELS_IN];
     float   f_in[PERIOD_FRAMES];
     float   f_mid[PERIOD_FRAMES];
     float   f_out_buf[PERIOD_FRAMES];
@@ -367,10 +370,18 @@ int main(int argc, char **argv) {
             pb_raw[i * 2 + 1] = v;
         }
 
-        snd_pcm_sframes_t w = snd_pcm_writei(pb, pb_raw, (snd_pcm_uframes_t)n);
-        if (w < 0) {
-            snd_pcm_recover(pb, (int)w, 0);
-            atomic_fetch_add_explicit(&g_xruns, 1, memory_order_relaxed);
+        snd_pcm_uframes_t written = 0;
+        while (written < (snd_pcm_uframes_t)n && !g_quit) {
+            snd_pcm_sframes_t w = snd_pcm_writei(
+                pb, pb_raw + written * CHANNELS_OUT,
+                (snd_pcm_uframes_t)n - written);
+            if (w < 0) {
+                snd_pcm_recover(pb, (int)w, 0);
+                atomic_fetch_add_explicit(&g_xruns, 1, memory_order_relaxed);
+                break;
+            }
+            if (w == 0) break;
+            written += (snd_pcm_uframes_t)w;
         }
     }
 

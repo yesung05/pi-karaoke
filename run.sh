@@ -14,6 +14,14 @@ done
 bash /home/karaoke/pi-karaoke/monitor.sh &
 
 export DISPLAY=:0
+export GTK_IM_MODULE=ibus
+export QT_IM_MODULE=ibus
+export XMODIFIERS=@im=ibus
+
+# 한글 입력기(IBus) 초기화. 이미 실행 중이면 기존 세션을 재사용한다.
+if command -v ibus-daemon >/dev/null 2>&1; then
+    ibus-daemon -drx >/tmp/ibus-karaoke.log 2>&1 || true
+fi
 export XDG_RUNTIME_DIR=/run/user/1000
 
 # xrandr가 알아낸 연결된 출력들을 좌표 순서로 정렬해
