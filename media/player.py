@@ -85,7 +85,9 @@ class MpvPlayer:
             # --video-sync=audio 사용 시 오디오 클럭이 느리게 인식돼 영상이 늦음.
             # desync: 오디오·영상 각각 스트림 PTS 기반으로 독립 재생 (dmix 클럭 의존 제거)
             '--video-sync=audio',
-            '--audio-pitch-correction=no',
+            '--audio-pitch-correction=yes',
+            # 저장된 배속을 첫 프레임부터 적용해 시작 후 시간축이 튀지 않게 한다.
+            f'--speed={self._saved_speed:.6f}',
             '--audio-buffer=0.2',
             # 720p 분리 스트림은 네트워크 순간 변동에 민감하므로
             # 재생 중 버퍼를 확보해 끊김을 흡수한다.
@@ -140,8 +142,6 @@ class MpvPlayer:
 
     def _apply_saved_settings(self) -> None:
         time.sleep(1.0)
-        if self._saved_speed != 1.0:
-            self.set_speed(self._saved_speed)
         if self._saved_pitch != 0:
             self.set_pitch(self._saved_pitch)
         self.set_volume(self._saved_volume)
@@ -198,15 +198,21 @@ class MpvPlayer:
         """Apply a pitch shift to the current song via mpv's lavfi filter."""
         self._saved_pitch = max(-6, min(6, semitones))
         semitones = self._saved_pitch
-        # Replace (rather than append) one filter.  atempo compensates for
-        # asetrate's duration change, so pitch changes do not alter tempo.
+        # Replace (rather than append) one filter. YouTube karaoke audio is
+        # commonly 44.1kHz (some HD streams are 48kHz); use mpv's actual
+        # source rate so pitch round-trips return to the exact original key.
         if not semitones:
             self._ipc({'command': ['af', 'clr', 'all']})
             return
         ratio = 2.0 ** (float(semitones) / 12.0)
         inv = 1.0 / ratio
+        source_rate = self._ipc_request('audio-params/samplerate') or 44100
+        try:
+            source_rate = int(source_rate)
+        except (TypeError, ValueError):
+            source_rate = 44100
         self._ipc({'command': ['af', 'set',
-                               f'lavfi=[asetrate=48000*{ratio:.6f},aresample=48000,atempo={inv:.6f}]']})
+                               f'lavfi=[asetrate={source_rate}*{ratio:.6f},aresample={source_rate},atempo={inv:.6f}]']})
 
     def play_effect(self, path: str) -> None:
         """Play a short UI effect without interrupting the karaoke video."""
@@ -249,6 +255,19 @@ class MpvPlayer:
                 s.sendall(json.dumps(cmd).encode() + b'\n')
         except OSError:
             pass
+
+    def _ipc_request(self, prop: str):
+        """Read an mpv property when a pitch filter needs the source rate."""
+        try:
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                s.settimeout(0.5)
+                s.connect(self.IPC_PATH)
+                s.sendall(json.dumps({'command': ['get_property', prop],
+                                      'request_id': 'karaoke-rate'}).encode() + b'\n')
+                data = s.recv(4096)
+            return json.loads(data.decode(errors='replace')).get('data')
+        except (OSError, ValueError, TypeError):
+            return None
 
     @property
     def state(self) -> str:
