@@ -51,9 +51,9 @@ class MpvPlayer:
         # Pi 4: AV1/VP9 소프트웨어 디코딩 → CPU 과부하. H.264 720p + hwdec + fast 프로파일로 고정.
         is_linux = platform.system() == 'Linux'
         ytdl_format = (
-            'bestvideo[height<=720][vcodec^=avc1]+bestaudio'
-            '/bestvideo[height<=720]+bestaudio'
+            'best[ext=mp4][height<=720]'
             '/best[height<=720]'
+            '/best'
             if is_linux else
             'bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best'
         )

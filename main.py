@@ -171,8 +171,7 @@ def main():
     # ── tkinter: 숨겨진 Root ─────────────────────────────────────
     root = tk.Tk()
     root.title('Pi Karaoke Root')
-    root.update_idletasks()
-    root.deiconify()
+    root.withdraw()
 
     # ── HDMI1 제어 창 ────────────────────────────────────────────
     ctrl_win = ControlWindow(
