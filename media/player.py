@@ -32,6 +32,7 @@ class MpvPlayer:
         self._end_cb: Optional[Callable[[], None]] = None
         self._target_geom: tuple[int, int, int, int] = (0, 0, 1920, 1080)
         self.audio_device: str = ''  # 'pulse/<sink_name>'; 빈 문자열이면 PipeWire 기본 싱크
+        self.video_wid: int = 0     # X11 window ID - 설정되면 해당 창 안에 렌더링 (WM 우회)
         self._saved_speed = 1.0
         self._saved_pitch = 0
         self._saved_volume = 40
@@ -68,33 +69,26 @@ class MpvPlayer:
             'bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best'
         )
         source_url = youtube_url
-        direct_url = False
-        if is_linux and ('youtube.com' in youtube_url or 'youtu.be' in youtube_url):
-            try:
-                import sys
-                ytdlp_bin = str(__import__('pathlib').Path(sys.executable).parent / 'yt-dlp')
-                resolved = subprocess.run(
-                    [ytdlp_bin, '--no-warnings', '--no-playlist', '-g',
-                     '-f', 'best[height<=720]/best', youtube_url],
-                    capture_output=True, text=True, timeout=20,
-                )
-                candidate = next((ln.strip() for ln in resolved.stdout.splitlines() if ln.strip()), '')
-                if resolved.returncode == 0 and candidate.startswith(('http://', 'https://')):
-                    source_url = candidate
-                    direct_url = True
-                    logger.info('YouTube 직접 미디어 URL 해석 완료')
-                else:
-                    logger.warning('YouTube 직접 URL 해석 실패, mpv ytdl fallback 사용')
-            except Exception as exc:
-                logger.warning('YouTube URL 해석 예외: %s', exc)
+        # A local library path is already a playable source. Keep it out of
+        # yt-dlp/mpv's ytdl hook so playback is offline and ad-free.
+        is_local = youtube_url.startswith('file://') or os.path.isfile(youtube_url)
+        direct_url = is_local
+        if is_local:
+            logger.info('로컬 미디어 재생: %s', youtube_url)
+        use_wid = is_linux and bool(self.video_wid)
         cmd = [
             'mpv',
             '--no-terminal',
             '--no-sub',
-            f'--geometry={width}x{height}+{x}+{y}',
-            '--fullscreen',
-            '--no-border',
-            '--x11-bypass-compositor=yes',
+        ]
+        if not use_wid:
+            cmd += [
+                f'--geometry={width}x{height}+{x}+{y}',
+                '--fullscreen',
+                '--no-border',
+                '--x11-bypass-compositor=yes',
+            ]
+        cmd += [
             f'--input-ipc-server={self.IPC_PATH}',
             f'--log-file={MPV_LOG}',
             '--msg-level=all=warn',
@@ -123,9 +117,14 @@ class MpvPlayer:
             )
             if not direct_url:
                 cmd.append(f'--script-opts=ytdl_hook-ytdl_path={venv_ytdlp}')
+                # YouTube SABR 실험 우회: android 클라이언트는 plain CDN URL 반환
+                # ANDROID_VR/web 클라이언트는 spc 토큰으로 mpv libavformat 접근 차단됨
+                cmd.append('--ytdl-raw-options=extractor-args=youtube:player_client=android')
+            if use_wid:
+                cmd.append(f'--wid={self.video_wid}')
             cmd += [
-                '--hwdec=v4l2m2m-copy',      # Pi 4 H.264 하드웨어 디코딩 → RAM 복사 (DMA-BUF 없음 → X11 락 없음)
-                '--gpu-context=x11egl',      # EGL on X11 (copy모드라 DMA-BUF import 없음 → 마우스 정상)
+                '--vo=gpu',                  # GPU 렌더링 (wid 임베드 시 X11 EGL 자동 선택)
+                '--hwdec=v4l2m2m-copy',      # Pi 4 H.264 하드웨어 디코딩 → CPU 버퍼로 복사
                 '--ao=alsa',                 # ALSA 직접 출력 (PipeWire 우회)
             ]
             # dmix 장치명: main.py가 설정한 값 사용 (폴백 시 pulse와 일치)
@@ -154,11 +153,12 @@ class MpvPlayer:
                 return
 
         threading.Thread(target=self._monitor_proc, daemon=True).start()
-        threading.Thread(
-            target=self._fix_window_position,
-            args=(x, y, width, height),
-            daemon=True,
-        ).start()
+        if not use_wid:
+            threading.Thread(
+                target=self._fix_window_position,
+                args=(x, y, width, height),
+                daemon=True,
+            ).start()
         threading.Thread(target=self._apply_saved_settings, daemon=True).start()
 
     def _apply_saved_settings(self) -> None:

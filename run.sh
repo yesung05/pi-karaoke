@@ -18,6 +18,19 @@ export GTK_IM_MODULE=ibus
 export QT_IM_MODULE=ibus
 export XMODIFIERS=@im=ibus
 
+# 노래방 화면은 항상 켜 둔다.
+if command -v xset >/dev/null 2>&1; then
+    xset s off -dpms s noblank >/dev/null 2>&1 || true
+fi
+
+# LXDE 배경화면과 패널이 종료되어도 노래방 시작 시 복구한다.
+if command -v pcmanfm >/dev/null 2>&1 && ! pgrep -u "$(id -u)" -x pcmanfm >/dev/null 2>&1; then
+    nohup pcmanfm --desktop >/tmp/karaoke-desktop.log 2>&1 &
+fi
+if command -v lxpanel >/dev/null 2>&1 && ! pgrep -u "$(id -u)" -x lxpanel >/dev/null 2>&1; then
+    nohup lxpanel >/tmp/karaoke-panel.log 2>&1 &
+fi
+
 # 한글 입력기(IBus) 초기화. 이미 실행 중이면 기존 세션을 재사용한다.
 if command -v ibus-daemon >/dev/null 2>&1; then
     ibus-daemon -drx >/tmp/ibus-karaoke.log 2>&1 || true

@@ -74,5 +74,6 @@ class PlaybackManager:
         if next_song:
             self._play(next_song)
         else:
+            self._player.stop()
             self._state.set_current(None)
             self._state.set_status('stopped')

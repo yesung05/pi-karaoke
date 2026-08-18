@@ -10,7 +10,7 @@ from config       import EchoParams
 from core.app_state  import AppState
 from core.display    import detect_monitors, assign_displays, configure_16_10_monitor
 from core.playback   import PlaybackManager
-from media.player    import MpvPlayer
+from media.player import MpvPlayer
 from gui.control_window import ControlWindow
 from gui.media_window   import MediaWindow
 
@@ -172,6 +172,23 @@ def main():
     root = tk.Tk()
     root.title('Pi Karaoke Root')
     root.withdraw()
+
+    # ── 비디오 배경 창 (mpv --wid 임베드용) ──────────────────────
+    # openbox 같은 WM이 mpv 일반 창을 숨기는 문제 우회:
+    # overrideredirect=True 창은 WM을 거치지 않아 항상 표시됨.
+    if platform.system() == 'Linux' and media_mon:
+        video_bg = tk.Toplevel(root)
+        video_bg.overrideredirect(True)
+        video_bg.geometry(
+            f'{media_mon.width}x{media_mon.height}+{media_mon.x}+{media_mon.y}'
+        )
+        video_bg.configure(bg='black')
+        video_bg.lower()  # MediaWindow보다 아래에 위치
+        root.update()
+        player.video_wid = video_bg.winfo_id()
+        logging.info('비디오 배경 창 WID: %d', player.video_wid)
+    else:
+        video_bg = None
 
     # ── HDMI1 제어 창 ────────────────────────────────────────────
     ctrl_win = ControlWindow(
