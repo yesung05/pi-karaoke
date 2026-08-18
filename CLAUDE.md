@@ -11,7 +11,7 @@ Raspberry Pi 4 기반 노래방 시스템. Focusrite Scarlett Solo 오디오 인
 ### Pi에 배포 및 실행
 
 ```bash
-# 파일을 Pi(192.168.0.60)에 SSH 업로드하고 앱 재시작
+# 파일을 Pi(192.168.137.123)에 SSH 업로드하고 앱 재시작
 python deploy_pi.py
 
 # 원격 앱 상태/로그 확인
@@ -99,7 +99,7 @@ python tests/test_display_assignment.py
 
 ### 배포 구조
 
-- `deploy_pi.py`: paramiko SSH로 `FILES_TO_SYNC` 파일들을 `192.168.0.60`에 업로드 후 `run.sh` 실행
+- `deploy_pi.py`: paramiko SSH로 `FILES_TO_SYNC` 파일들을 `192.168.137.123`에 업로드 후 `run.sh` 실행
 - Pi 경로: `/home/karaoke/pi-karaoke/`, venv: `/home/karaoke/pi-karaoke/venv/`
 - 로그: `/tmp/karaoke.log`
 

@@ -3,7 +3,7 @@ import paramiko
 
 ssh = paramiko.SSHClient()
 ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-ssh.connect('192.168.0.60', username='karaoke', password='12345678', timeout=15)
+ssh.connect('192.168.137.123', username='karaoke', password='12345678', timeout=15)
 
 start_cmd = "pkill -f main.py || true; nohup bash /home/karaoke/pi-karaoke/run.sh >/tmp/karaoke.log 2>&1 &"
 ssh.exec_command(start_cmd)

@@ -1,6 +1,6 @@
 import paramiko
 
-HOST = '192.168.0.60'
+HOST = '192.168.137.123'
 USER = 'karaoke'
 PASS = '12345678'
 

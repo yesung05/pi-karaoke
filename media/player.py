@@ -61,18 +61,36 @@ class MpvPlayer:
             # 곡마다 딜레이가 달라지는 문제 발생 → 폴백으로만 사용
             # 720p H.264 영상 + 오디오를 우선 사용해 HD 화질을 확보한다.
             # 720p가 없는 영상은 결합 스트림/기존 best로 자동 fallback.
-            'bestvideo[height<=720][vcodec^=avc1]+bestaudio'
+            'bestvideo[height<=720]+bestaudio/best[height<=720]/best'
             '/best[height<=720]'
             '/best'
             if is_linux else
             'bestvideo[height<=1080]+bestaudio/bestvideo+bestaudio/best'
         )
+        source_url = youtube_url
+        direct_url = False
+        if is_linux and ('youtube.com' in youtube_url or 'youtu.be' in youtube_url):
+            try:
+                import sys
+                ytdlp_bin = str(__import__('pathlib').Path(sys.executable).parent / 'yt-dlp')
+                resolved = subprocess.run(
+                    [ytdlp_bin, '--no-warnings', '--no-playlist', '-g',
+                     '-f', 'best[height<=720]/best', youtube_url],
+                    capture_output=True, text=True, timeout=20,
+                )
+                candidate = next((ln.strip() for ln in resolved.stdout.splitlines() if ln.strip()), '')
+                if resolved.returncode == 0 and candidate.startswith(('http://', 'https://')):
+                    source_url = candidate
+                    direct_url = True
+                    logger.info('YouTube 직접 미디어 URL 해석 완료')
+                else:
+                    logger.warning('YouTube 직접 URL 해석 실패, mpv ytdl fallback 사용')
+            except Exception as exc:
+                logger.warning('YouTube URL 해석 예외: %s', exc)
         cmd = [
             'mpv',
             '--no-terminal',
             '--no-sub',
-            '--ytdl',
-            f'--ytdl-format={ytdl_format}',
             f'--geometry={width}x{height}+{x}+{y}',
             '--fullscreen',
             '--no-border',
@@ -96,13 +114,16 @@ class MpvPlayer:
             '--demuxer-readahead-secs=30',
             '--demuxer-max-bytes=200MiB',
         ]
+        if not direct_url:
+            cmd[3:3] = ['--ytdl', f'--ytdl-format={ytdl_format}']
         if is_linux:
             import sys
             venv_ytdlp = str(
                 __import__('pathlib').Path(sys.executable).parent / 'yt-dlp'
             )
+            if not direct_url:
+                cmd.append(f'--script-opts=ytdl_hook-ytdl_path={venv_ytdlp}')
             cmd += [
-                f'--script-opts=ytdl_hook-ytdl_path={venv_ytdlp}',
                 '--hwdec=v4l2m2m-copy',      # Pi 4 H.264 하드웨어 디코딩 → RAM 복사 (DMA-BUF 없음 → X11 락 없음)
                 '--gpu-context=x11egl',      # EGL on X11 (copy모드라 DMA-BUF import 없음 → 마우스 정상)
                 '--ao=alsa',                 # ALSA 직접 출력 (PipeWire 우회)
@@ -112,7 +133,7 @@ class MpvPlayer:
             cmd.append(f'--audio-device={ao_dev}')
         elif self.audio_device:
             cmd.append(f'--audio-device={self.audio_device}')
-        cmd.append(youtube_url)
+        cmd.append(source_url)
 
         # mpv를 코어 2,3에 고정(오디오 코어 0,1과 분리)
         # nice를 제거: 오디오 스레드가 dmix 5.3ms 주기를 지키려면 기본 우선순위 필요

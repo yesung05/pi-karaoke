@@ -115,11 +115,12 @@ if platform.system() == 'Linux':
 
         def _spawn_proc(self):
             """C 프로세스를 새로 시작하고 READY를 기다린다."""
+            err_log = open('/tmp/karaoke_audio.err', 'a', encoding='utf-8')
             self._proc = subprocess.Popen(
                 [str(_BIN), self._alsa_cap_dev(), self._alsa_pb_dev()],
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
+                stderr=err_log,
                 text=True,
                 bufsize=1,
             )

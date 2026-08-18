@@ -9,7 +9,7 @@ cmd = r'''
 export DISPLAY=:0
 export XDG_RUNTIME_DIR=/run/user/1000
 cd /home/karaoke/pi-karaoke
-nohup /home/karaoke/pi-karaoke/venv/bin/python main.py >> /tmp/karaoke.log 2>&1 &
+nohup bash /home/karaoke/pi-karaoke/run.sh >> /tmp/karaoke.log 2>&1 &
 '''
 ssh.exec_command(cmd)
 

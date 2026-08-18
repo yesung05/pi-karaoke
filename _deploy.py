@@ -8,7 +8,7 @@ Pi 카라오케 전체 재배포 스크립트
 import os, paramiko, time, sys
 from pathlib import Path
 
-HOST   = '192.168.0.60'
+HOST   = '192.168.137.123'
 USER   = 'karaoke'
 PASS   = '12345678'
 REMOTE = '/home/karaoke/pi-karaoke'

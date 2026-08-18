@@ -203,6 +203,15 @@ static snd_pcm_t *open_pcm(const char *dev, snd_pcm_stream_t stream,
         fprintf(stderr, "ERROR hw_params %s\n", dev);
         snd_pcm_close(h); return NULL;
     }
+    snd_pcm_sw_params_t *sw = NULL;
+    snd_pcm_sw_params_alloca(&sw);
+    if (snd_pcm_sw_params_current(h, sw) >= 0) {
+        snd_pcm_sw_params_set_avail_min(h, sw, period);
+        if (stream == SND_PCM_STREAM_PLAYBACK)
+            snd_pcm_sw_params_set_start_threshold(h, sw, 1);
+        if (snd_pcm_sw_params(h, sw) < 0)
+            fprintf(stderr, "WARN sw_params %s\n", dev);
+    }
     snd_pcm_prepare(h);
     return h;
 }
@@ -342,6 +351,7 @@ int main(int argc, char **argv) {
 
         snd_pcm_sframes_t n = snd_pcm_readi(cap, cap_raw, PERIOD_FRAMES);
         if (n < 0) {
+            fprintf(stderr, "CAP_XRUN %ld: %s\n", (long)n, snd_strerror((int)n));
             snd_pcm_recover(cap, (int)n, 0);
             atomic_fetch_add_explicit(&g_xruns, 1, memory_order_relaxed);
             continue;
@@ -371,17 +381,21 @@ int main(int argc, char **argv) {
         }
 
         snd_pcm_uframes_t written = 0;
+        int write_retries = 0;
         while (written < (snd_pcm_uframes_t)n && !g_quit) {
             snd_pcm_sframes_t w = snd_pcm_writei(
                 pb, pb_raw + written * CHANNELS_OUT,
                 (snd_pcm_uframes_t)n - written);
             if (w < 0) {
+                fprintf(stderr, "PB_XRUN %ld: %s\n", (long)w, snd_strerror((int)w));
                 snd_pcm_recover(pb, (int)w, 0);
                 atomic_fetch_add_explicit(&g_xruns, 1, memory_order_relaxed);
+                if (++write_retries < 4) continue;
                 break;
             }
             if (w == 0) break;
             written += (snd_pcm_uframes_t)w;
+            write_retries = 0;
         }
     }
 

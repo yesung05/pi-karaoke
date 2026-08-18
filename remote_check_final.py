@@ -21,6 +21,14 @@ nmcli -f IN-USE,SSID,SIGNAL,SECURITY device wifi list 2>/dev/null | head -n 30 |
 echo '--- REMOTE RUN ---'
 ps -eo pid,comm,args --no-headers | grep -E 'python.*main.py|bash.*run.sh' | grep -v grep || true
 
+echo '--- DESKTOP SESSION ---'
+ps -eo pid,comm,args --no-headers | grep -E 'Xorg|Xwayland|labwc|wayfire|openbox|pcmanfm|lxpanel|weston|gnome-shell|xfce4|terminal' | grep -v grep || true
+loginctl list-sessions 2>/dev/null || true
+echo '--- TERMINAL BINARIES ---'
+command -v lxterminal x-terminal-emulator xterm xfce4-terminal konsole gnome-terminal alacritty 2>/dev/null || true
+echo '--- OPENBOX CONFIG ---'
+grep -nE 'terminal|Super|C-A-t|keybind' /home/karaoke/.config/openbox/* 2>/dev/null | head -n 80 || true
+
 echo '--- LOG ---'
 tail -n 80 /tmp/karaoke.log 2>/dev/null || true
 
